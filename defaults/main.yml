@@ -1,4 +1,5 @@
-ldap_host: example.com
+ldap_domain: example.com
+ldap_org: Example Org
 ldap_dc: dc=example,dc=com
 ldap_password: yourLdapSecretPassword 
 ldap_password_size: 22  # The length ldap_password

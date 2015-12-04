@@ -1,70 +1,63 @@
 ---
 
-- name: ldap | Make an ansible directory for remembering what we previously run
-  file: path=$ldap_done_dir state=directory owner=root group=root
-  tags: 
-    - ldap
-    - auth
+- name: ldap | debconf for slapd
+  debconf: name=slapd question='slapd/no_configuration' value='false' vtype='boolean'
+
+- name: ldap | debconf for slapd
+  debconf: name=slapd question='slapd/domain' value='{{ldap_domain}}' vtype='string'
+
+- name: ldap | debconf for slapd
+  debconf: name=slapd question='shared/organization' value='{{ldap_org}}' vtype='string'
+
+- name: ldap | debconf for slapd
+  debconf: name=slapd question='slapd/password1' value='{{ldap_password}}' vtype='password'
+
+- name: ldap | debconf for slapd
+  debconf: name=slapd question='slapd/password2' value='{{ldap_password}}' vtype='password'
+
+- name: ldap | debconf for slapd
+  debconf: name=slapd question='slapd/backend' value='MDB' vtype='select'
+
+- name: ldap | debconf for slapd
+  debconf: name=slapd question='slapd/purge_database' value='false' vtype='boolean'
+
+- name: ldap | debconf for slapd
+  debconf: name=slapd question='slapd/move_old_database' value='true' vtype='boolean'
+
+- name: ldap | debconf for slapd
+  debconf: name=slapd question='slapd/allow_ldap_v2' value='false' vtype='boolean'
 
 - name: ldap | install ldap packages
-  apt: pkg=$item state=installed
+  apt: pkg={{item}} state=installed
   with_items:
     - slapd 
     - ldap-utils
-    - ldapscripts 
   tags: 
     - ldap
     - auth
 
-- name: Have we configured slapd before?
-  shell: "[ -f $ldap_slapd_dpkg_reconfigure_done ] && echo 'found' || echo ''"
-  register: ldap_slapd_already_configured 
-
-- name: ldap | Configure slapd
-  dpkg_reconfigure: 
-    pkg: slapd 
-    answers:
-      slapd/internal/generated_adminpw: password     
-      slapd/password2: $ldap_password 
-      slapd/password1: $ldap_password 
-      slapd/allow_ldap_v2: false
-      shared/organization: $ldap_host 
-      slapd/no_configuration: false
-      slapd/move_old_database: true 
-      slapd/dump_database_destdir: /var/backups/slapd-VERSION
-      slapd/purge_database: false
-      slapd/domain: $ldap_host
-      slapd/backend: HDB
-      slapd/dump_database: when needed
-  when: ldap_slapd_already_configured.stdout.find('found') == -1
-
-- name: ldap | Ugly hack to make sure the slapd reconfigure does not get run more than once
-  shell: touch $ldap_slapd_dpkg_reconfigure_done creates=$ldap_slapd_dpkg_reconfigure_done
+- name: ldap | Copy over the create users and group ldif 
+  template: src=create_users_and_groups.ldif.j2 dest=/tmp/create_users_and_groups.ldif owner=root group=root
+  when: ldap_include_create_user_and_groups
   tags: 
-    - ldap
+    - ldap 
+    - auth 
+
+- name: ldap | Install users and groups 
+  shell: ldapadd -w {{ldap_password}} -x -D cn=admin,{{ldap_dc}} -f create_users_and_groups.ldif chdir=/tmp
+  when: ldap_include_create_user_and_groups
+  tags: 
+    - ldap 
     - auth
 
-- include: load-schema.yml
-
-- name: ldap | ensure ldapscripts.conf exists
-  template: src=root/etc/ldapscripts/ldapscripts.conf.j2 dest=/etc/ldapscripts/ldapscripts.conf owner=root group=root
-  tags: 
-    - ldap
-    - auth
-
-- name: ldap | Install add user template
-  template: src=root/etc/ldapscripts/ldapadduser.template.j2 dest=/etc/ldapscripts/ldapadduser.template owner=root group=root
+- name: ldap | ensure ldap.conf exists
+  template: src=ldap.conf.j2 dest=/etc/ldap/ldap.conf owner=root group=root
   tags: 
     - ldap
     - auth
 
 - name: ldap | ensure ldap.secret exists
-  template: src=root/etc/ldap.secret.j2 dest=/etc/ldap.secret owner=root group=root mode=0400
+  template: src=ldap.secret.j2 dest=/etc/ldap/ldap.secret owner=root group=root mode=0400
   tags: 
     - ldap
     - auth
-
-# This is really goofy but editing the secrets file in vims leaves an extra space at the end. Not sure what all editors do this
-# If your editor does not do this then this command will mess up your file.
-- name: ldap | ensure ldap.secret has no trailing space
-  command: truncate --size $ldap_password_size /etc/ldap.secret
